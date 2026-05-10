@@ -46,8 +46,11 @@ RUN git clone --depth 1 --branch "$FORK_REF" "$FORK_URL" .
 # --depth keeps the clone small.
 RUN git submodule update --init --depth 1 lib/vscode
 
-# Apply code-server's own quilt patches (they target the vscode tree).
-RUN cd lib/vscode && QUILT_PATCHES=../../patches quilt push -a
+# Apply code-server's own quilt patches.  per docs/CONTRIBUTING.md these
+# are applied from the repo root (the patch headers carry the
+# `code-server/lib/vscode/...` prefix and quilt's default strip resolves
+# them against $PWD).
+RUN quilt push -a
 
 # Apply the Dance overlay + register the workbench contribution.
 RUN ./dance/install-into-vscode.sh
