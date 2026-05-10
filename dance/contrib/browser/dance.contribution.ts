@@ -28,6 +28,8 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Extensions as ConfigExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { registerWorkbenchContribution2, IWorkbenchContribution, WorkbenchPhase } from '../../../common/contributions.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { DanceMainThreadLoader } from './danceLoader.js';
 
 // =================================================================================================
 // Context keys
@@ -451,12 +453,21 @@ class DanceContribution extends Disposable implements IWorkbenchContribution {
 		@ICodeEditorService codeEditorService: ICodeEditorService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ILogService private readonly logService: ILogService,
+		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
 		const states = this._register(new DanceEditorStates(codeEditorService));
 		const modeKey = DANCE_MODE_KEY.bindTo(contextKeyService);
 		runtime = { modeKey, states };
 		this.logService.info('[dance] core contribution online');
+
+		// Load dance directly into the workbench's main thread.  This is the
+		// "no IPC" path: dance.activate() runs as a regular function call here,
+		// and every vscode.* call hits a workbench service synchronously.
+		const loader = instantiationService.invokeFunction(accessor =>
+			new DanceMainThreadLoader(accessor, this.logService));
+		this._register(loader);
+		void loader.activate();
 	}
 
 	override dispose(): void {
