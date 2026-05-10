@@ -59,6 +59,7 @@ RUN ./dance/install-into-vscode.sh
 # Without this, native modules (native-keymap, etc.) try to compile against
 # unpatched Electron headers and fail with "EmbedderStateTag does not name a type".
 # Mirrors what code-server's own .github/workflows/release.yaml does.
+SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
 RUN cd lib/vscode/build && npm ci \
   && cd .. \
   && if [[ -f build/azure-pipelines/linux/setup-env.sh ]]; then . build/azure-pipelines/linux/setup-env.sh ; fi \
