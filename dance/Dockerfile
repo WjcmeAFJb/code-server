@@ -75,6 +75,19 @@ RUN cd lib/vscode/build && npm ci \
 # so the postinstall hook also handles lib/vscode.
 RUN npm ci
 
+# vsce's manifest validator hardcodes the allowed extensionKinds to
+# {'ui','workspace'} even though vscode-web does support 'web'. We need 'web'
+# so vscode-web's BrowserExtensionHostKindPicker routes dance to the
+# LocalWebWorkerExtensionHost (postMessage IPC) instead of the slow
+# RemoteExtensionHost (websocket RPC). Patch both copies of vsce.
+RUN set -eux; \
+    for f in $(find lib/vscode -path '*/node_modules/@vscode/vsce/out/package.js' 2>/dev/null); do \
+      if grep -q "new Set(\\['ui', 'workspace'\\])" "$f"; then \
+        echo "[dance] patching vsce extensionKind allow-list in $f"; \
+        sed -i "s/new Set(\\['ui', 'workspace'\\])/new Set(['ui', 'workspace', 'web'])/g" "$f"; \
+      fi; \
+    done
+
 # Build VS Code (REH-web flavour, the one code-server consumes).
 RUN VERSION=0.0.0-dance npm run build:vscode
 
