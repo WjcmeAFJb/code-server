@@ -55,8 +55,17 @@ RUN quilt push -a
 # Apply the Dance overlay + register the workbench contribution.
 RUN ./dance/install-into-vscode.sh
 
-# Install dependencies.  SKIP_SUBMODULE_DEPS is intentionally NOT set so the
-# postinstall step also installs lib/vscode's deps (needed for the build).
+# Install lib/vscode/build deps first so the v8 header patcher can run.
+# Without this, native modules (native-keymap, etc.) try to compile against
+# unpatched Electron headers and fail with "EmbedderStateTag does not name a type".
+# Mirrors what code-server's own .github/workflows/release.yaml does.
+RUN cd lib/vscode/build && npm ci \
+  && cd .. \
+  && if [[ -f build/azure-pipelines/linux/setup-env.sh ]]; then . build/azure-pipelines/linux/setup-env.sh ; fi \
+  && node build/npm/preinstall.ts
+
+# Now install root + lib/vscode + test deps.  SKIP_SUBMODULE_DEPS is NOT set
+# so the postinstall hook also handles lib/vscode.
 RUN npm ci
 
 # Build VS Code (REH-web flavour, the one code-server consumes).
