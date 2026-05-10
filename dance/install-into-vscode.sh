@@ -32,11 +32,26 @@ cp -rT "$DANCE_DIR/contrib" "$VSCODE_DIR/src/vs/workbench/contrib/dance"
 
 WORKBENCH_MAIN="$VSCODE_DIR/src/vs/workbench/workbench.common.main.ts"
 if grep -q "contrib/dance/browser/dance.contribution" "$WORKBENCH_MAIN"; then
-  echo "[dance] workbench.common.main.ts already wires up the contribution — skipping patch"
+  echo "[dance] workbench.common.main.ts already wires up the contribution — skipping"
 else
-  echo "[dance] applying register-contrib.patch"
-  (cd "$VSCODE_DIR" && git apply --ignore-whitespace "$DANCE_DIR/register-contrib.patch") \
-    || (cd "$VSCODE_DIR" && git apply --ignore-whitespace --recount --reject "$DANCE_DIR/register-contrib.patch")
+  # Insert our import directly after the performance contribution import.  The
+  # line-number-keyed patch breaks across vscode versions; an in-place edit
+  # against a unique anchor is robust to upstream churn.
+  ANCHOR="import './contrib/performance/browser/performance.contribution.js';"
+  if ! grep -qF "$ANCHOR" "$WORKBENCH_MAIN"; then
+    echo "[dance] anchor line not found in workbench.common.main.ts — vscode layout has changed" >&2
+    exit 1
+  fi
+  echo "[dance] inserting workbench import after the performance contribution"
+  awk -v anchor="$ANCHOR" '
+    {print}
+    $0 == anchor && !done {
+      print ""
+      print "// Dance (modal editing) core contribution"
+      print "import '\''./contrib/dance/browser/dance.contribution.js'\'';"
+      done = 1
+    }
+  ' "$WORKBENCH_MAIN" > "$WORKBENCH_MAIN.tmp" && mv "$WORKBENCH_MAIN.tmp" "$WORKBENCH_MAIN"
 fi
 
 echo "[dance] integration applied."
