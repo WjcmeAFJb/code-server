@@ -38,8 +38,12 @@ done
 have_image() { "$RUNTIME" image exists "$IMAGE" 2>/dev/null || "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1; }
 
 if (( REBUILD )) || ! have_image; then
-  echo "[serve] building $IMAGE with $RUNTIME …"
-  "$RUNTIME" build -t "$IMAGE" -f dance/Dockerfile .
+  # Forward the head sha as a build arg so the docker layer cache invalidates
+  # whenever the branch advances, otherwise `git clone` is cached and we keep
+  # rebuilding the same old commit.
+  CACHE_BUST=$(git rev-parse HEAD 2>/dev/null || date +%s)
+  echo "[serve] building $IMAGE with $RUNTIME (cache-bust=${CACHE_BUST:0:8}) …"
+  "$RUNTIME" build --build-arg "CACHE_BUST=$CACHE_BUST" -t "$IMAGE" -f dance/Dockerfile .
 fi
 
 mkdir -p "$HOME/.config/code-server-dance" "$HOME/.local/share/code-server-dance"

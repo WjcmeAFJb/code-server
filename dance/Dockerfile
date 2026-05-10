@@ -35,12 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ARG FORK_URL=https://github.com/WjcmeAFJb/code-server.git
 ARG FORK_REF=dance-embed
+# Pass --build-arg CACHE_BUST=$(git rev-parse HEAD) to force a fresh clone
+# (otherwise docker happily reuses the cached layer even when the remote
+# branch advanced).  The default literal value here means "use cache when
+# possible"; serve.sh sets it to the head sha automatically.
+ARG CACHE_BUST=stable
 WORKDIR /src
 
 # Clone the fork (rather than COPYing the local context) so the build
 # survives the project's `.dockerignore` of **, and so re-running the
 # Dockerfile against a remote machine works without sharing the workspace.
-RUN git clone --depth 1 --branch "$FORK_REF" "$FORK_URL" .
+RUN echo "cache-bust: $CACHE_BUST" \
+  && git clone --depth 1 --branch "$FORK_REF" "$FORK_URL" .
 
 # Initialise the vscode submodule from the URL recorded in .gitmodules.
 # --depth keeps the clone small.
