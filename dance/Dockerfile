@@ -33,14 +33,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
-# Working dir.
+ARG FORK_URL=https://github.com/WjcmeAFJb/code-server.git
+ARG FORK_REF=dance-embed
 WORKDIR /src
 
-# Copy the fork in (the build context is the fork root).
-COPY . .
+# Clone the fork (rather than COPYing the local context) so the build
+# survives the project's `.dockerignore` of **, and so re-running the
+# Dockerfile against a remote machine works without sharing the workspace.
+RUN git clone --depth 1 --branch "$FORK_REF" "$FORK_URL" .
 
-# Initialise the vscode submodule from the URL recorded in .gitmodules.  We
-# use --depth so the build doesn't pull years of history.
+# Initialise the vscode submodule from the URL recorded in .gitmodules.
+# --depth keeps the clone small.
 RUN git submodule update --init --depth 1 lib/vscode
 
 # Apply code-server's own quilt patches (they target the vscode tree).
