@@ -154,6 +154,9 @@ const VscodeEnums = {
 	DecorationRangeBehavior: { OpenOpen: 0, ClosedClosed: 1, OpenClosed: 2, ClosedOpen: 3 },
 	TextEditorSelectionChangeKind: { Keyboard: 1, Mouse: 2, Command: 3 },
 	ExtensionKind: { UI: 1, Workspace: 2 },
+	TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+	ExtensionMode: { Production: 1, Development: 2, Test: 3 },
+	UIKind: { Desktop: 1, Web: 2 },
 };
 
 // =================================================================================================
@@ -332,6 +335,7 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 	// --- Events that dance subscribes to ---
 	const onDidChangeActiveTextEditor = new VscodeEventEmitter<VscodeTextEditor | undefined>();
 	const onDidChangeTextEditorSelection = new VscodeEventEmitter<{ textEditor: VscodeTextEditor; selections: VscodeSelection[]; kind: number | undefined }>();
+	const onDidChangeTextEditorVisibleRanges = new VscodeEventEmitter<{ textEditor: VscodeTextEditor; visibleRanges: VscodeRange[] }>();
 	const onDidChangeVisibleTextEditors = new VscodeEventEmitter<VscodeTextEditor[]>();
 	const onDidChangeConfiguration = new VscodeEventEmitter<{ affectsConfiguration: (s: string) => boolean }>();
 	const onDidOpenTextDocument = new VscodeEventEmitter<VscodeTextDocument>();
@@ -341,6 +345,7 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 	ctxDisposables.add(toDisposable(() => {
 		onDidChangeActiveTextEditor.dispose();
 		onDidChangeTextEditorSelection.dispose();
+		onDidChangeTextEditorVisibleRanges.dispose();
 		onDidChangeVisibleTextEditors.dispose();
 		onDidChangeConfiguration.dispose();
 		onDidOpenTextDocument.dispose();
@@ -348,13 +353,25 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 		onDidChangeTextDocument.dispose();
 	}));
 
-	ctxDisposables.add(codeEditorService.onCodeEditorAdd(e => {
+	const hookEditor = (e: ICodeEditor) => {
 		const v = getOrMakeEditor(e);
 		ctxDisposables.add(e.onDidChangeCursorSelection(() => {
 			if (v) {
 				onDidChangeTextEditorSelection.fire({ textEditor: v, selections: v.selections, kind: undefined });
 			}
 		}));
+		ctxDisposables.add(e.onDidScrollChange(() => {
+			if (v) {
+				onDidChangeTextEditorVisibleRanges.fire({ textEditor: v, visibleRanges: v.visibleRanges });
+			}
+		}));
+		ctxDisposables.add(e.onDidFocusEditorWidget(() => { onDidChangeActiveTextEditor.fire(v); }));
+		return v;
+	};
+	// Hook editors already present at construction time.
+	for (const e of codeEditorService.listCodeEditors()) { hookEditor(e); }
+	ctxDisposables.add(codeEditorService.onCodeEditorAdd(e => {
+		const v = hookEditor(e);
 		const focused = codeEditorService.getFocusedCodeEditor();
 		if (focused === e) { onDidChangeActiveTextEditor.fire(v); }
 		onDidChangeVisibleTextEditors.fire(codeEditorService.listCodeEditors().map(c => getOrMakeEditor(c)!).filter(Boolean));
@@ -390,6 +407,9 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 		DecorationRangeBehavior: VscodeEnums.DecorationRangeBehavior,
 		TextEditorSelectionChangeKind: VscodeEnums.TextEditorSelectionChangeKind,
 		ExtensionKind: VscodeEnums.ExtensionKind,
+		TreeItemCollapsibleState: VscodeEnums.TreeItemCollapsibleState,
+		ExtensionMode: VscodeEnums.ExtensionMode,
+		UIKind: VscodeEnums.UIKind,
 
 		// ThemeColor / ThemeIcon — placeholder objects
 		ThemeColor: class { constructor(public id: string) { } },
@@ -414,7 +434,7 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 			onDidChangeActiveTextEditor: onDidChangeActiveTextEditor.event,
 			onDidChangeVisibleTextEditors: onDidChangeVisibleTextEditors.event,
 			onDidChangeTextEditorSelection: onDidChangeTextEditorSelection.event,
-			onDidChangeTextEditorVisibleRanges: new VscodeEventEmitter<unknown>().event,
+			onDidChangeTextEditorVisibleRanges: onDidChangeTextEditorVisibleRanges.event,
 			onDidChangeTextEditorOptions: new VscodeEventEmitter<unknown>().event,
 			onDidChangeWindowState: new VscodeEventEmitter<unknown>().event,
 			showInformationMessage(message: string, ...items: any[]) { notificationService.info(message); return Promise.resolve(items[0]); },
@@ -427,6 +447,29 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 				const arr = await Promise.resolve(items);
 				const list = (Array.isArray(arr) ? arr : []).map((it: any) => typeof it === 'string' ? { label: it } : it);
 				return quickInputService.pick(list, { placeHolder: options?.placeHolder, canPickMany: options?.canPickMany });
+			},
+			createInputBox() {
+				// The internal IInputBox already implements the same public surface dance uses
+				// (.value, .placeholder, .password, .validationMessage, .onDidChangeValue,
+				// .onDidAccept, .show(), .hide(), .dispose()). Hand it back unchanged.
+				return quickInputService.createInputBox();
+			},
+			createQuickPick() {
+				// IQuickPick exposes .items, .value, .placeholder, .onDidChangeValue, .onDidAccept,
+				// .activeItems, .selectedItems, .show(), .hide(), .dispose() — directly usable.
+				return quickInputService.createQuickPick();
+			},
+			async showTextDocument(documentOrUri: any, _columnOrOptions?: any, _preserveFocus?: boolean) {
+				// Resolve to a URI then route to the workbench's editor.open command. We can't
+				// directly return a VscodeTextEditor here without IEditorService, but dance only
+				// uses the result for its `.viewColumn`/`.document.uri` properties on the file-pick
+				// flow — both come back implicitly via the now-focused editor.
+				const uri = documentOrUri instanceof URI ? documentOrUri
+					: (documentOrUri && documentOrUri.uri instanceof URI) ? documentOrUri.uri
+					: typeof documentOrUri === 'string' ? URI.parse(documentOrUri)
+					: URI.from(documentOrUri);
+				await commandService.executeCommand('vscode.open', uri);
+				return getOrMakeEditor(codeEditorService.getFocusedCodeEditor() ?? codeEditorService.getActiveCodeEditor());
 			},
 			createStatusBarItem(_alignment?: number, _priority?: number) {
 				return {
@@ -621,17 +664,20 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 		// env
 		env: {
 			appName: 'VSCodium',
-			appHost: 'desktop',
+			appHost: 'web',
 			appRoot: '/',
 			machineId: 'dance-renderer',
 			sessionId: 'dance-session',
 			language: 'en',
 			uriScheme: 'vscode',
+			remoteName: undefined as string | undefined,
+			uiKind: 2, // UIKind.Web
 			clipboard: {
-				readText: () => Promise.resolve(''),
-				writeText: (_t: string) => Promise.resolve(),
+				readText: () => navigator.clipboard?.readText?.() ?? Promise.resolve(''),
+				writeText: (t: string) => navigator.clipboard?.writeText?.(t) ?? Promise.resolve(),
 			},
-			openExternal: () => Promise.resolve(false),
+			openExternal: (uri: any) => { try { window.open(typeof uri === 'string' ? uri : uri?.toString?.(), '_blank'); return Promise.resolve(true); } catch { return Promise.resolve(false); } },
+			asExternalUri: (uri: any) => Promise.resolve(uri),
 		},
 
 		// Constants
