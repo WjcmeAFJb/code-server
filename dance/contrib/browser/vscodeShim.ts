@@ -54,13 +54,15 @@ class VscodePosition {
 		if (typeof linesOrChange === 'object' && linesOrChange !== null) {
 			return new VscodePosition(this.line + (linesOrChange.lineDelta ?? 0), this.character + (linesOrChange.characterDelta ?? 0));
 		}
-		return new VscodePosition(this.line + (linesOrChange ?? 0), this.character + (characters ?? 0));
+		const dl = typeof linesOrChange === 'number' ? linesOrChange : 0;
+		return new VscodePosition(this.line + dl, this.character + (characters ?? 0));
 	}
 	with(lineOrChange?: number | { line?: number; character?: number }, character?: number): VscodePosition {
 		if (typeof lineOrChange === 'object' && lineOrChange !== null) {
 			return new VscodePosition(lineOrChange.line ?? this.line, lineOrChange.character ?? this.character);
 		}
-		return new VscodePosition(lineOrChange ?? this.line, character ?? this.character);
+		const ln = typeof lineOrChange === 'number' ? lineOrChange : this.line;
+		return new VscodePosition(ln, character ?? this.character);
 	}
 	toJSON(): { line: number; character: number } { return { line: this.line, character: this.character }; }
 }
@@ -202,7 +204,7 @@ class VscodeTextDocument {
 	get eol(): number { return this.model.getEOL() === '\n' ? 1 : 2; }
 	get lineCount(): number { return this.model.getLineCount(); }
 	get encoding(): string { return 'utf8'; }
-	save(): Thenable<boolean> { return Promise.resolve(true); }
+	save(): Promise<boolean> { return Promise.resolve(true); }
 	lineAt(lineOrPosition: number | VscodePosition): { lineNumber: number; text: string; range: VscodeRange; rangeIncludingLineBreak: VscodeRange; firstNonWhitespaceCharacterIndex: number; isEmptyOrWhitespace: boolean } {
 		const lineNumber = typeof lineOrPosition === 'number' ? lineOrPosition : lineOrPosition.line;
 		const text = this.model.getLineContent(lineNumber + 1);
@@ -265,10 +267,11 @@ class VscodeTextEditor {
 	get options(): { tabSize: number; insertSpaces: boolean; cursorStyle: number; lineNumbers: number } {
 		const model = this.editor.getModel();
 		const opts = model?.getOptions();
+		const rawTabSize = opts?.tabSize;
 		return {
-			tabSize: opts?.tabSize ?? 4,
+			tabSize: typeof rawTabSize === 'number' ? rawTabSize : 4,
 			insertSpaces: opts?.insertSpaces ?? true,
-			cursorStyle: this.editor.getOption(/* CursorStyle option index */ 24) ?? 1,
+			cursorStyle: (this.editor.getOption(/* CursorStyle option index */ 24) as unknown as number | undefined) ?? 1,
 			lineNumbers: 1,
 		};
 	}
@@ -276,7 +279,7 @@ class VscodeTextEditor {
 	private _sync(): void {
 		this.editor.setSelections(this.selections.map(toInternalSelection));
 	}
-	edit(callback: (builder: VscodeTextEditorEdit) => void, _options?: { undoStopBefore?: boolean; undoStopAfter?: boolean }): Thenable<boolean> {
+	edit(callback: (builder: VscodeTextEditorEdit) => void, _options?: { undoStopBefore?: boolean; undoStopAfter?: boolean }): Promise<boolean> {
 		const builder = new VscodeTextEditorEdit();
 		try { callback(builder); } catch (err) { return Promise.reject(err); }
 		const ops = builder.operations.filter(o => o.text !== null);
@@ -538,10 +541,10 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 				});
 				return new VscodeDisposable(() => sub.dispose());
 			},
-			executeCommand<T>(id: string, ...args: any[]): Thenable<T> {
+			executeCommand<T>(id: string, ...args: any[]): Promise<T> {
 				return commandService.executeCommand<T>(id, ...args);
 			},
-			getCommands(_filterInternal?: boolean): Thenable<string[]> {
+			getCommands(_filterInternal?: boolean): Promise<string[]> {
 				return Promise.resolve(Object.keys(CommandsRegistry.getCommands()));
 			},
 		},
@@ -593,7 +596,7 @@ export function createVscodeShim(accessor: ServicesAccessor, ctxDisposables: Dis
 					...root,
 				};
 			},
-			applyEdit(edit: any): Thenable<boolean> {
+			applyEdit(edit: any): Promise<boolean> {
 				const operations: ResourceEdit[] = [];
 				for (const [uri, edits] of (edit?._edits ?? edit?.entries?.() ?? [])) {
 					for (const e of edits) {
