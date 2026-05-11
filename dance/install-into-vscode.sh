@@ -36,11 +36,17 @@ python3 - "$VSCODE_DIR/extensions/dance/package.json" <<'PYEOF'
 import json, sys
 p = sys.argv[1]
 with open(p) as f: d = json.load(f)
+# Drop main/browser/activationEvents entirely: the vscode manifest validator
+# (see lib/vscode/build/lib/extensions.* and @vscode/vsce) refuses a manifest
+# that declares activationEvents without main/browser, even an empty list.
+# Without these keys, the extension loader treats the dir as manifest-only,
+# which is exactly what we want — contributes (commands/keybindings/menus)
+# still get registered, but no extension code is loaded via the host.
 d.pop("main", None)
 d.pop("browser", None)
-d["activationEvents"] = []
+d.pop("activationEvents", None)
 with open(p, "w") as f: json.dump(d, f, indent=2)
-print("[dance]   manifest now has no main/browser, activationEvents=[]")
+print("[dance]   manifest stripped of main/browser/activationEvents (contributes-only)")
 PYEOF
 
 echo "[dance] copying workbench contribution → $VSCODE_DIR/src/vs/workbench/contrib/dance/"
